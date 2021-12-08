@@ -1,8 +1,16 @@
 use cascade::cascade;
+use chrono::prelude::*;
 use gtk::prelude::*;
 use i18n_embed::DesktopLanguageRequester;
 use libhandy::prelude::*;
-use std::{fs, process, str, thread, time};
+use popsec::tpm2_totp::Tpm2Totp;
+use std::{
+    fs,
+    str,
+    sync::{Arc, Mutex},
+    thread,
+    time
+};
 
 mod localize;
 
@@ -97,24 +105,62 @@ fn secure_boot<C: ContainerExt>(container: &C) {
 fn tpm<C: ContainerExt>(container: &C) {
     let list_box = settings_list_box(container, &fl!("tpm"));
 
-    //TODO: serious cleanup, sync with 30 second interval
-    let (sender, receiver) = glib::MainContext::channel(glib::PRIORITY_DEFAULT);
-    thread::spawn(move || {
-        loop {
-            let output = process::Command::new("sudo")
-                .arg("tpm2-totp")
-                .arg("show")
-                .output()
-                .unwrap();
-            let stdout = String::from_utf8(output.stdout).unwrap();
-            sender.send(stdout);
-            thread::sleep(time::Duration::from_secs(5));
-        }
-    });
+    let tpm2_totp = Arc::new(Mutex::new(Tpm2Totp::new()));
 
-    let label = label_row(&list_box, &fl!("tpm2-totp"));
-    receiver.attach(None, move |stdout| {
-        label.set_text(&stdout);
+    enum Message {
+        Code(String),
+        Timeout(f64),
+    }
+    let (sender, receiver) = glib::MainContext::channel(glib::PRIORITY_DEFAULT);
+    {
+        let tpm2_totp = tpm2_totp.clone();
+        thread::spawn(move || {
+            loop {
+                let result = tpm2_totp.lock().unwrap().show();
+                sender.send(Message::Code(match result {
+                    Ok(ok) => ok.0,
+                    Err(err) => err.0,
+                })).expect("failed to send tpm2-totp code");
+
+                // Sleep until next TOTP window
+                loop {
+                    let current = chrono::Utc::now().second();
+                    let next = ((current + 29) / 30) * 30;
+                    let remaining = next - current;
+                    sender.send(Message::Timeout(
+                        remaining as f64 / 30.0
+                    )).expect("failed to send tpm2-totp timeout");
+                    if remaining == 0 {
+                        break;
+                    }
+                    thread::sleep(time::Duration::new(1, 0));
+                }
+            }
+        });
+    }
+
+    let label = gtk::Label::new(None);
+    let progress_bar = cascade!{
+        gtk::ProgressBar::new();
+        ..set_valign(gtk::Align::Center);
+    };
+    let row = cascade! {
+        libhandy::ActionRow::new();
+        ..set_title(Some(&fl!("tpm2-totp")));
+        ..add(&label);
+        ..add(&progress_bar);
+    };
+    list_box.add(&row);
+
+    receiver.attach(None, move |message| {
+        match message {
+            Message::Code(code) => {
+                label.set_text(&code);
+            },
+            Message::Timeout(timeout) => {
+                progress_bar.set_fraction(timeout);
+            },
+        }
         glib::Continue(true)
     });
 }

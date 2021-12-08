@@ -7,10 +7,12 @@ edition = "2021"
 
 [dependencies]
 cascade = "1.0.0"
+chrono = "0.4"
 glib = "0.14.8"
 gtk = "0.14.3"
-libhandy = "0.8.0"
 i18n-embed = { version = "0.13.0", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.6.1"
+libhandy = "0.8.0"
 once_cell = "1.8.0"
+popsec = { path = ".." }
 rust-embed = { version = "6.3.0", features = ["debug-embed"] }

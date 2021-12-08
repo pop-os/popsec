@@ -7,3 +7,4 @@ edition = "2021"
 members = ["gtk"]
 
 [dependencies]
+sys-info = "0.9.1"
