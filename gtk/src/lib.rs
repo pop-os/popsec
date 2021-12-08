@@ -3,7 +3,11 @@ use chrono::prelude::*;
 use gtk::prelude::*;
 use i18n_embed::DesktopLanguageRequester;
 use libhandy::prelude::*;
-use popsec::tpm2_totp::Tpm2Totp;
+use popsec::tpm2_totp::{
+    TotpCode,
+    TotpError,
+    Tpm2Totp
+};
 use std::{
     fs,
     str,
@@ -105,10 +109,14 @@ fn secure_boot<C: ContainerExt>(container: &C) {
 fn tpm<C: ContainerExt>(container: &C) {
     let list_box = settings_list_box(container, &fl!("tpm"));
 
-    let tpm2_totp = Arc::new(Mutex::new(Tpm2Totp::new()));
+    let tpm2_totp = Arc::new(Mutex::new(
+        //TODO: better error handling
+        Tpm2Totp::new().unwrap()
+    ));
 
     enum Message {
-        Code(String),
+        Code(TotpCode),
+        Error(TotpError),
         Timeout(f64),
     }
     let (sender, receiver) = glib::MainContext::channel(glib::PRIORITY_DEFAULT);
@@ -117,16 +125,29 @@ fn tpm<C: ContainerExt>(container: &C) {
         thread::spawn(move || {
             loop {
                 let result = tpm2_totp.lock().unwrap().show();
-                sender.send(Message::Code(match result {
-                    Ok(ok) => ok.0,
-                    Err(err) => err.0,
-                })).expect("failed to send tpm2-totp code");
+                match result {
+                    Ok(ok) => {
+                        sender.send(Message::Code(ok))
+                            .expect("failed to send tpm2-totp code");
+                    },
+                    Err(err) => {
+                        sender.send(Message::Error(err))
+                            .expect("failed to send tpm2-totp error");
+                        thread::sleep(time::Duration::new(1, 0));
+                    },
+                }
 
                 // Sleep until next TOTP window
+                //TODO: improve logic
+                let start = chrono::Utc::now().second();
                 loop {
                     let current = chrono::Utc::now().second();
                     let next = ((current + 29) / 30) * 30;
-                    let remaining = next - current;
+                    let remaining = if next == start {
+                        30
+                    } else {
+                        next - current
+                    };
                     sender.send(Message::Timeout(
                         remaining as f64 / 30.0
                     )).expect("failed to send tpm2-totp timeout");
@@ -140,22 +161,60 @@ fn tpm<C: ContainerExt>(container: &C) {
     }
 
     let label = gtk::Label::new(None);
-    let progress_bar = cascade!{
+    let progress_bar = cascade! {
         gtk::ProgressBar::new();
+        ..set_no_show_all(true);
         ..set_valign(gtk::Align::Center);
+        ..set_visible(false);
+    };
+    let init_button = cascade! {
+        gtk::Button::with_label(&fl!("tpm2-totp-init-button"));
+        ..set_no_show_all(true);
+        ..set_valign(gtk::Align::Center);
+        ..set_visible(false);
+    };
+    let reseal_button = cascade! {
+        gtk::Button::with_label(&fl!("tpm2-totp-reseal-button"));
+        ..set_no_show_all(true);
+        ..set_valign(gtk::Align::Center);
+        ..set_visible(false);
     };
     let row = cascade! {
         libhandy::ActionRow::new();
         ..set_title(Some(&fl!("tpm2-totp")));
         ..add(&label);
         ..add(&progress_bar);
+        ..add(&init_button);
+        ..add(&reseal_button);
     };
     list_box.add(&row);
+
 
     receiver.attach(None, move |message| {
         match message {
             Message::Code(code) => {
-                label.set_text(&code);
+                label.set_text(&format!("{:06}", code.0));
+                progress_bar.set_visible(true);
+                init_button.set_visible(false);
+                reseal_button.set_visible(false);
+            },
+            Message::Error(error) => {
+                progress_bar.set_visible(false);
+                init_button.set_visible(false);
+                reseal_button.set_visible(false);
+                match error {
+                    TotpError::SecretNotFound => {
+                        label.set_text(&fl!("tpm2-totp-init"));
+                        init_button.set_visible(true);
+                    },
+                    TotpError::SystemStateChanged => {
+                        label.set_text(&fl!("tpm2-totp-reseal"));
+                        reseal_button.set_visible(true);
+                    },
+                    _ => {
+                        label.set_text(&format!("{}", error));
+                    }
+                }
             },
             Message::Timeout(timeout) => {
                 progress_bar.set_fraction(timeout);

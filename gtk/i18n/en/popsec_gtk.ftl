@@ -4,3 +4,7 @@ secure-boot = Secure Boot
 setup-mode = Setup Mode
 tpm = Trusted Platform Module
 tpm2-totp = TPM2 TOTP
+tpm2-totp-init = Secret is not set up
+tpm2-totp-init-button = Set Up
+tpm2-totp-reseal = System state has changed
+tpm2-totp-reseal-button = Reseal
