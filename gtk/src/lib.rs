@@ -6,12 +6,18 @@ use libhandy::prelude::*;
 use popsec::tpm2_totp::{
     TotpCode,
     TotpError,
+    TotpPass,
+    TotpSecret,
     Tpm2Totp
 };
 use std::{
     fs,
     str,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc,
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time
 };
@@ -49,20 +55,6 @@ fn label_row<C: ContainerExt>(container: &C, title: &str) -> gtk::Label {
     };
     container.add(&row);
     label
-}
-
-fn switch_row<C: ContainerExt>(container: &C, title: &str) -> gtk::Switch {
-    let switch = cascade! {
-        gtk::Switch::new();
-        ..set_valign(gtk::Align::Center);
-    };
-    let row = cascade! {
-        libhandy::ActionRow::new();
-        ..set_title(Some(title));
-        ..add(&switch);
-    };
-    container.add(&row);
-    switch
 }
 
 fn settings_list_box<C: ContainerExt>(container: &C, title: &str) -> gtk::ListBox {
@@ -106,6 +98,22 @@ fn secure_boot<C: ContainerExt>(container: &C) {
     label.set_text(&if setup_mode { fl!("enabled") } else { fl!("disabled") });
 }
 
+fn otpauth_url(secret: &TotpSecret) -> String {
+    let description = match sys_info::hostname() {
+        Ok(hostname) => format!("{} TPM2-TOTP", hostname),
+        Err(_) => format!("TPM2-TOTP"),
+    };
+    let secret_b32 = base32::encode(
+        base32::Alphabet::RFC4648 { padding: false },
+        &secret.0
+    );
+    format!(
+        "otpauth://totp/{}?secret={}",
+        description,
+        secret_b32
+    )
+}
+
 fn tpm<C: ContainerExt>(container: &C) {
     let list_box = settings_list_box(container, &fl!("tpm"));
 
@@ -113,6 +121,7 @@ fn tpm<C: ContainerExt>(container: &C) {
         //TODO: better error handling
         Tpm2Totp::new().unwrap()
     ));
+    let refresh = Arc::new(AtomicBool::new(false));
 
     enum Message {
         Code(TotpCode),
@@ -122,6 +131,7 @@ fn tpm<C: ContainerExt>(container: &C) {
     let (sender, receiver) = glib::MainContext::channel(glib::PRIORITY_DEFAULT);
     {
         let tpm2_totp = tpm2_totp.clone();
+        let refresh = refresh.clone();
         thread::spawn(move || {
             loop {
                 let result = tpm2_totp.lock().unwrap().show();
@@ -144,7 +154,7 @@ fn tpm<C: ContainerExt>(container: &C) {
                 } else {
                     start.with_second(0).unwrap() + chrono::Duration::minutes(1)
                 };
-                loop {
+                while ! refresh.swap(false, Ordering::Relaxed) {
                     let current = chrono::Utc::now().with_nanosecond(0).unwrap();
                     let remaining = end.signed_duration_since(current).num_seconds();
                     sender.send(Message::Timeout(
@@ -188,6 +198,50 @@ fn tpm<C: ContainerExt>(container: &C) {
     };
     list_box.add(&row);
 
+    {
+        //TODO: tpm2_totp in thread
+        let tpm2_totp = tpm2_totp.clone();
+        let refresh = refresh.clone();
+        init_button.connect_clicked(move |button| {
+            button.set_sensitive(false);
+
+            //TODO: password dialog
+            let result = tpm2_totp.lock().unwrap().init(&TotpPass("test".to_string()));
+            refresh.swap(true, Ordering::Relaxed);
+            match result {
+                Ok(secret) => {
+                    let url = otpauth_url(&secret);
+
+                    //TODO: error handling and cleanup
+                    let qr = qrcode::QrCode::new(url).unwrap();
+                    let svg = qr.render::<qrcode::render::svg::Color>().build();
+                    let bytes = glib::Bytes::from(svg.as_bytes());
+                    let stream = gio::MemoryInputStream::from_bytes(&bytes);
+                    let pixbuf = gdk_pixbuf::Pixbuf::from_stream(
+                        &stream,
+                        None::<&gio::Cancellable>
+                    ).unwrap();
+
+                    //TODO: improve dialog
+                    let image = gtk::Image::from_pixbuf(Some(&pixbuf));
+                    let dialog = cascade! {
+                        gtk::Dialog::new();
+                        ..add_button(&fl!("ok"), gtk::ResponseType::Ok);
+                        ..content_area().add(&image);
+                    };
+                    dialog.show_all();
+                    dialog.run();
+                    dialog.hide();
+                },
+                Err(err) => {
+                    //TODO: send to GUI
+                    println!("failed to initialize: {:?}", err);
+                }
+            }
+
+            button.set_sensitive(true);
+        });
+    }
 
     receiver.attach(None, move |message| {
         match message {

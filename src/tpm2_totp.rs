@@ -1,6 +1,7 @@
 use std::{
     ffi::CString,
     ptr,
+    slice,
 };
 use thiserror::Error;
 use tss_esapi::{
@@ -22,8 +23,6 @@ impl<T> Drop for AutoFree<T> {
         }
     }
 }
-
-pub struct TotpAuth(pub String);
 
 #[derive(Debug, Error)]
 pub enum TotpError {
@@ -49,6 +48,8 @@ pub enum TotpError {
 pub struct TotpCode(pub u64);
 
 pub struct TotpPass(pub String);
+
+pub struct TotpSecret(pub Vec<u8>);
 
 impl TotpError {
     fn from_rc(rc: libc::c_int) -> Self {
@@ -100,24 +101,87 @@ impl Tpm2Totp {
             context
         })
     }
-
-    fn label(&self) -> Result<String, TotpError> {
-        let hostname = sys_info::hostname().map_err(|err| TotpError::Other(format!(
-            "tpm2-totp: failed to read hostname: {}", err
-        )))?;
-        Ok(format!("{} TPM2-TOTP", hostname))
-    }
-
+    
     pub fn clean(&mut self) -> Result<(), TotpError> {
         unimplemented!();
     }
 
-    pub fn init(&mut self, password: &TotpPass) -> Result<TotpAuth, TotpError> {
-        unimplemented!();
+    pub fn init(&mut self, password: &TotpPass) -> Result<TotpSecret, TotpError> {
+        unsafe {
+            let password_c = CString::new(password.0.as_str()).map_err(|err| {
+                TotpError::Other(format!(
+                    "failed to convert password to C string: {}", err
+                ))
+            })?;
+            let mut secret = AutoFree(ptr::null_mut());
+            let mut secret_size = 0;
+            let mut key_blob = AutoFree(ptr::null_mut());
+            let mut key_blob_size = 0;
+            let mut rc = tpm2totp_generateKey(
+                Self::PCRS,
+                Self::BANKS,
+                password_c.as_ptr(),
+                self.context.tcti_context_ptr() as *mut TSS2_TCTI_CONTEXT,
+                &mut secret.0,
+                &mut secret_size,
+                &mut key_blob.0,
+                &mut key_blob_size
+            );
+            if rc != 0 {
+                return Err(TotpError::from_rc(rc));
+            }
+
+            rc = tpm2totp_storeKey_nv(
+                key_blob.0,
+                key_blob_size,
+                Self::NVRAM_INDEX,
+                self.context.tcti_context_ptr() as *mut TSS2_TCTI_CONTEXT,
+            );
+            if rc != 0 {
+                return Err(TotpError::from_rc(rc));
+            }
+
+            let secret_vec = slice::from_raw_parts(secret.0, secret_size as usize).to_vec();
+            Ok(TotpSecret(secret_vec))
+        }
     }
 
-    pub fn recover(&mut self, password: &TotpPass) -> Result<TotpAuth, TotpError> {
-        unimplemented!();
+    pub fn recover(&mut self, password: &TotpPass) -> Result<TotpSecret, TotpError> {
+        unsafe {
+            let mut key_blob = AutoFree(ptr::null_mut());
+            let mut key_blob_size = 0;
+            let mut rc = tpm2totp_loadKey_nv(
+                Self::NVRAM_INDEX,
+                self.context.tcti_context_ptr() as *mut TSS2_TCTI_CONTEXT,
+                &mut key_blob.0,
+                &mut key_blob_size
+            );
+            if rc != 0 {
+                return Err(TotpError::from_rc(rc));
+            }
+
+            let password_c = CString::new(password.0.as_str()).map_err(|err| {
+                TotpError::Other(format!(
+                    "failed to convert password to C string: {}", err
+                ))
+            })?;
+            let mut secret = AutoFree(ptr::null_mut());
+            let mut secret_size = 0;
+            rc = tpm2totp_getSecret(
+                key_blob.0,
+                key_blob_size,
+                password_c.as_ptr(),
+                self.context.tcti_context_ptr() as *mut TSS2_TCTI_CONTEXT,
+                &mut secret.0,
+                &mut secret_size
+            );
+            if rc != 0 {
+                return Err(TotpError::from_rc(rc));
+            }
+
+            let secret_vec = slice::from_raw_parts(secret.0, secret_size as usize).to_vec();
+            Ok(TotpSecret(secret_vec))
+        }
     }
 
     pub fn reseal(&mut self, password: &TotpPass) -> Result<(), TotpError> {

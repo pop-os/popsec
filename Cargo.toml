@@ -11,7 +11,6 @@ members = [
 
 [dependencies]
 libc = "0.2.109"
-sys-info = "0.9.1"
 thiserror = "1.0.30"
 tpm2-totp-sys = { path = "tpm2-totp-sys" }
 tss-esapi = { git = "https://github.com/pop-os/rust-tss-esapi" }

@@ -1,5 +1,6 @@
 disabled = Disabled
 enabled = Enabled
+ok = Ok
 secure-boot = Secure Boot
 setup-mode = Setup Mode
 tpm = Trusted Platform Module
