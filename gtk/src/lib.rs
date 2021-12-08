@@ -138,20 +138,19 @@ fn tpm<C: ContainerExt>(container: &C) {
                 }
 
                 // Sleep until next TOTP window
-                //TODO: improve logic
-                let start = chrono::Utc::now().second();
+                let start = chrono::Utc::now().with_nanosecond(0).unwrap();
+                let end = if start.second() < 30 {
+                    start.with_second(30).unwrap()
+                } else {
+                    start.with_second(0).unwrap() + chrono::Duration::minutes(1)
+                };
                 loop {
-                    let current = chrono::Utc::now().second();
-                    let next = ((current + 29) / 30) * 30;
-                    let remaining = if next == start {
-                        30
-                    } else {
-                        next - current
-                    };
+                    let current = chrono::Utc::now().with_nanosecond(0).unwrap();
+                    let remaining = end.signed_duration_since(current).num_seconds();
                     sender.send(Message::Timeout(
                         remaining as f64 / 30.0
                     )).expect("failed to send tpm2-totp timeout");
-                    if remaining == 0 {
+                    if remaining <= 0 {
                         break;
                     }
                     thread::sleep(time::Duration::new(1, 0));
