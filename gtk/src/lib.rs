@@ -243,6 +243,28 @@ fn tpm<C: ContainerExt>(container: &C) {
         });
     }
 
+    {
+        //TODO: tpm2_totp in thread
+        let tpm2_totp = tpm2_totp.clone();
+        let refresh = refresh.clone();
+        reseal_button.connect_clicked(move |button| {
+            button.set_sensitive(false);
+
+            //TODO: password dialog
+            let result = tpm2_totp.lock().unwrap().reseal(&TotpPass("test".to_string()));
+            refresh.swap(true, Ordering::Relaxed);
+            match result {
+                Ok(()) => (),
+                Err(err) => {
+                    //TODO: send to GUI
+                    println!("failed to reseal: {:?}", err);
+                }
+            }
+
+            button.set_sensitive(true);
+        });
+    }
+
     receiver.attach(None, move |message| {
         match message {
             Message::Code(code) => {
