@@ -87,15 +87,49 @@ fn secure_boot<C: ContainerExt>(container: &C) {
         "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
     ).ok().map_or(false, |x| x.get(4).map_or(false, |x| *x > 0));
 
-    let label = label_row(&list_box, &fl!("secure-boot"));
-    label.set_text(&if secure_boot { fl!("enabled") } else { fl!("disabled") });
-
     let setup_mode = fs::read(
         "/sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c"
     ).ok().map_or(false, |x| x.get(4).map_or(false, |x| *x > 0));
 
-    let label = label_row(&list_box, &fl!("setup-mode"));
-    label.set_text(&if setup_mode { fl!("enabled") } else { fl!("disabled") });
+    let label = label_row(&list_box, &fl!("secure-boot-state"));
+    label.set_text(&if secure_boot {
+        if setup_mode {
+            fl!("setup-mode")
+        } else {
+            fl!("enabled")
+        }
+    } else {
+        fl!("disabled")
+    });
+
+    let label = gtk::Label::new(None);
+    let progress_bar = cascade! {
+        gtk::ProgressBar::new();
+        ..set_no_show_all(true);
+        ..set_valign(gtk::Align::Center);
+        ..set_visible(false);
+    };
+    let init_button = cascade! {
+        gtk::Button::with_label(&fl!("tpm2-totp-init-button"));
+        ..set_no_show_all(true);
+        ..set_valign(gtk::Align::Center);
+        ..set_visible(false);
+    };
+    let reseal_button = cascade! {
+        gtk::Button::with_label(&fl!("tpm2-totp-reseal-button"));
+        ..set_no_show_all(true);
+        ..set_valign(gtk::Align::Center);
+        ..set_visible(false);
+    };
+    let row = cascade! {
+        libhandy::ActionRow::new();
+        ..set_title(Some(&fl!("tpm2-totp")));
+        ..add(&label);
+        ..add(&progress_bar);
+        ..add(&init_button);
+        ..add(&reseal_button);
+    };
+    list_box.add(&row);
 }
 
 fn otpauth_url(secret: &TotpSecret) -> String {
@@ -112,6 +146,79 @@ fn otpauth_url(secret: &TotpSecret) -> String {
         description,
         secret_b32
     )
+}
+
+fn tpm_password_dialog(confirm: bool) -> Option<String> {
+    let entry = cascade! {
+        gtk::Entry::new();
+        ..set_valign(gtk::Align::Center);
+        ..set_visibility(false);
+    };
+    let entry_confirm = cascade! {
+        gtk::Entry::new();
+        ..set_valign(gtk::Align::Center);
+        ..set_visibility(false);
+    };
+    let list_box = cascade! {
+        gtk::ListBox::new();
+        ..set_selection_mode(gtk::SelectionMode::None);
+        ..add(&cascade! {
+            libhandy::ActionRow::new();
+            ..set_title(Some(&fl!("tpm2-totp-password")));
+            ..add(&entry);
+        });
+    };
+    if confirm {
+        list_box.add(&cascade! {
+            libhandy::ActionRow::new();
+            ..set_title(Some(&fl!("tpm2-totp-confirm")));
+            ..add(&entry_confirm);
+        });
+    }
+    let dialog = cascade! {
+        gtk::Dialog::new();
+        ..add_button(&fl!("cancel"), gtk::ResponseType::Cancel);
+        ..add_button(&fl!("ok"), gtk::ResponseType::Ok);
+        ..content_area().add(&list_box);
+    };
+    dialog.show_all();
+
+    {
+        let dialog = dialog.clone();
+        let entry_confirm = entry_confirm.clone();
+        entry.connect_activate(move |_| {
+            if confirm {
+                entry_confirm.grab_focus();
+            } else {
+                dialog.response(gtk::ResponseType::Ok);
+            }
+        });
+    }
+
+    {
+        let dialog = dialog.clone();
+        entry_confirm.connect_activate(move |_| {
+            if confirm {
+                dialog.response(gtk::ResponseType::Ok);
+            }
+        });
+    }
+
+    let res = loop {
+        entry.set_text("");
+        entry_confirm.set_text("");
+        entry.grab_focus();
+
+        if dialog.run() != gtk::ResponseType::Ok {
+            break None;
+        }
+        if !confirm || entry.text() == entry_confirm.text() {
+            break Some(entry.text().to_string());
+        }
+    };
+    dialog.hide();
+
+    res
 }
 
 fn tpm<C: ContainerExt>(container: &C) {
@@ -205,37 +312,38 @@ fn tpm<C: ContainerExt>(container: &C) {
         init_button.connect_clicked(move |button| {
             button.set_sensitive(false);
 
-            //TODO: password dialog
-            let result = tpm2_totp.lock().unwrap().init(&TotpPass("test".to_string()));
-            refresh.swap(true, Ordering::Relaxed);
-            match result {
-                Ok(secret) => {
-                    let url = otpauth_url(&secret);
+            if let Some(password) = tpm_password_dialog(true) {
+                let result = tpm2_totp.lock().unwrap().init(&TotpPass(password));
+                refresh.swap(true, Ordering::Relaxed);
+                match result {
+                    Ok(secret) => {
+                        let url = otpauth_url(&secret);
 
-                    //TODO: error handling and cleanup
-                    let qr = qrcode::QrCode::new(url).unwrap();
-                    let svg = qr.render::<qrcode::render::svg::Color>().build();
-                    let bytes = glib::Bytes::from(svg.as_bytes());
-                    let stream = gio::MemoryInputStream::from_bytes(&bytes);
-                    let pixbuf = gdk_pixbuf::Pixbuf::from_stream(
-                        &stream,
-                        None::<&gio::Cancellable>
-                    ).unwrap();
+                        //TODO: error handling and cleanup
+                        let qr = qrcode::QrCode::new(url).unwrap();
+                        let svg = qr.render::<qrcode::render::svg::Color>().build();
+                        let bytes = glib::Bytes::from(svg.as_bytes());
+                        let stream = gio::MemoryInputStream::from_bytes(&bytes);
+                        let pixbuf = gdk_pixbuf::Pixbuf::from_stream(
+                            &stream,
+                            None::<&gio::Cancellable>
+                        ).unwrap();
 
-                    //TODO: improve dialog
-                    let image = gtk::Image::from_pixbuf(Some(&pixbuf));
-                    let dialog = cascade! {
-                        gtk::Dialog::new();
-                        ..add_button(&fl!("ok"), gtk::ResponseType::Ok);
-                        ..content_area().add(&image);
-                    };
-                    dialog.show_all();
-                    dialog.run();
-                    dialog.hide();
-                },
-                Err(err) => {
-                    //TODO: send to GUI
-                    println!("failed to initialize: {:?}", err);
+                        //TODO: improve dialog
+                        let image = gtk::Image::from_pixbuf(Some(&pixbuf));
+                        cascade! {
+                            gtk::Dialog::new();
+                            ..add_button(&fl!("ok"), gtk::ResponseType::Ok);
+                            ..content_area().add(&image);
+                            ..show_all();
+                            ..run();
+                            ..hide();
+                        };
+                    },
+                    Err(err) => {
+                        //TODO: send to GUI
+                        println!("failed to initialize: {:?}", err);
+                    }
                 }
             }
 
@@ -250,14 +358,15 @@ fn tpm<C: ContainerExt>(container: &C) {
         reseal_button.connect_clicked(move |button| {
             button.set_sensitive(false);
 
-            //TODO: password dialog
-            let result = tpm2_totp.lock().unwrap().reseal(&TotpPass("test".to_string()));
-            refresh.swap(true, Ordering::Relaxed);
-            match result {
-                Ok(()) => (),
-                Err(err) => {
-                    //TODO: send to GUI
-                    println!("failed to reseal: {:?}", err);
+            if let Some(password) = tpm_password_dialog(false) {
+                let result = tpm2_totp.lock().unwrap().reseal(&TotpPass(password));
+                refresh.swap(true, Ordering::Relaxed);
+                match result {
+                    Ok(()) => (),
+                    Err(err) => {
+                        //TODO: send to GUI
+                        println!("failed to reseal: {:?}", err);
+                    }
                 }
             }
 
