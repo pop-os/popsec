@@ -101,35 +101,6 @@ fn secure_boot<C: ContainerExt>(container: &C) {
     } else {
         fl!("disabled")
     });
-
-    let label = gtk::Label::new(None);
-    let progress_bar = cascade! {
-        gtk::ProgressBar::new();
-        ..set_no_show_all(true);
-        ..set_valign(gtk::Align::Center);
-        ..set_visible(false);
-    };
-    let init_button = cascade! {
-        gtk::Button::with_label(&fl!("tpm2-totp-init-button"));
-        ..set_no_show_all(true);
-        ..set_valign(gtk::Align::Center);
-        ..set_visible(false);
-    };
-    let reseal_button = cascade! {
-        gtk::Button::with_label(&fl!("tpm2-totp-reseal-button"));
-        ..set_no_show_all(true);
-        ..set_valign(gtk::Align::Center);
-        ..set_visible(false);
-    };
-    let row = cascade! {
-        libhandy::ActionRow::new();
-        ..set_title(Some(&fl!("tpm2-totp")));
-        ..add(&label);
-        ..add(&progress_bar);
-        ..add(&init_button);
-        ..add(&reseal_button);
-    };
-    list_box.add(&row);
 }
 
 fn otpauth_url(secret: &TotpSecret) -> String {
