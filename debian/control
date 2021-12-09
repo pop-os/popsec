@@ -5,6 +5,7 @@ Maintainer: System76 <info@system76.com>
 Build-Depends:
   cargo,
   debhelper (>=10),
+  libclang-dev,
   libtpm2-totp0,
   libtss2-dev,
   pkg-config,
