@@ -1,0 +1,18 @@
+Source: popsec
+Section: admin
+Priority: optional
+Maintainer: System76 <info@system76.com>
+Build-Depends:
+  cargo,
+  debhelper (>=10),
+  libtpm2-totp0,
+  rustc (>=1.56.1~),
+Standards-Version: 4.3.0
+Homepage: https://github.com/pop-os/popsec
+
+Package: popsec
+Architecture: linux-any
+Depends:
+  ${misc:Depends},
+  ${shlibs:Depends}
+Description: Pop security tools

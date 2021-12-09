@@ -1,1 +1,4 @@
+/.cargo
 /target
+/vendor
+/vendor.tar
