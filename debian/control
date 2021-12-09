@@ -6,6 +6,7 @@ Build-Depends:
   cargo,
   debhelper (>=10),
   libtpm2-totp0,
+  pkg-config,
   rustc (>=1.56.1~),
 Standards-Version: 4.3.0
 Homepage: https://github.com/pop-os/popsec
