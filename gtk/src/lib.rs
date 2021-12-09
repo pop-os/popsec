@@ -265,7 +265,7 @@ fn tpm<C: ContainerExt>(container: &C) {
                     let current = chrono::Utc::now().with_nanosecond(0).unwrap();
                     let remaining = end.signed_duration_since(current).num_seconds();
                     sender.send(Message::Timeout(
-                        remaining as f64 / 30.0
+                        1.0 - remaining as f64 / 30.0
                     )).expect("failed to send tpm2-totp timeout");
                     if remaining <= 0 {
                         break;
