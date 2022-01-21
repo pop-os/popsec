@@ -5,12 +5,14 @@ edition = "2021"
 
 [workspace]
 members = [
+    "daemon",
     "gtk",
     "tpm2-totp-sys",
 ]
 
 [dependencies]
-libc = "0.2.109"
+dbus = "0.9.5"
+libc = "0.2.111"
 thiserror = "1.0.30"
 tpm2-totp-sys = { path = "tpm2-totp-sys" }
 tss-esapi = { git = "https://github.com/pop-os/rust-tss-esapi" }

@@ -1,0 +1,10 @@
+[package]
+name = "popsec-daemon"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dbus = "0.9.5"
+dbus-crossroads = "0.5.0"
+libc = "0.2.111"
+popsec = { path = ".." }

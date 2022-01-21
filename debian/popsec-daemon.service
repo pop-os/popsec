@@ -1,0 +1,9 @@
+[Unit]
+Description=PopSec Daemon
+
+[Service]
+ExecStart=/usr/lib/popsec/popsec-daemon
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

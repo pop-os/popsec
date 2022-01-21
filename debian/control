@@ -15,9 +15,16 @@ Build-Depends:
 Standards-Version: 4.3.0
 Homepage: https://github.com/pop-os/popsec
 
-Package: popsec
+Package: popsec-daemon
 Architecture: linux-any
 Depends:
   ${misc:Depends},
   ${shlibs:Depends}
-Description: Pop security tools
+Description: Pop security daemon
+
+Package: popsec-gtk
+Architecture: linux-any
+Depends:
+  ${misc:Depends},
+  ${shlibs:Depends}
+Description: Pop security GTK application

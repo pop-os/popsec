@@ -45,6 +45,7 @@ pub enum TotpError {
     Other(String),
 }
 
+#[derive(Debug)]
 pub struct TotpCode(pub u64);
 
 pub struct TotpPass(pub String);
@@ -101,7 +102,7 @@ impl Tpm2Totp {
             context
         })
     }
-    
+
     pub fn clean(&mut self) -> Result<(), TotpError> {
         unimplemented!();
     }

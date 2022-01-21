@@ -1,0 +1,2 @@
+/etc/dbus-1/system.d/popsec-daemon.conf
+/usr/lib/popsec/popsec-daemon
