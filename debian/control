@@ -25,6 +25,7 @@ Description: Pop security daemon
 Package: popsec-gtk
 Architecture: linux-any
 Depends:
+  popsec-daemon,
   ${misc:Depends},
   ${shlibs:Depends}
 Description: Pop security GTK application
