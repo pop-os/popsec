@@ -3,6 +3,10 @@ use chrono::prelude::*;
 use gtk::prelude::*;
 use i18n_embed::DesktopLanguageRequester;
 use libhandy::prelude::*;
+use popsec::dbus::{
+    Client as DbusClient,
+    Error as DbusError,
+};
 use popsec::tpm2_totp::{
     TotpCode,
     TotpError,
@@ -15,7 +19,6 @@ use std::{
     str,
     sync::{
         Arc,
-        Mutex,
         atomic::{AtomicBool, Ordering},
     },
     thread,
@@ -195,24 +198,20 @@ fn tpm_password_dialog(confirm: bool) -> Option<String> {
 fn tpm<C: ContainerExt>(container: &C) {
     let list_box = settings_list_box(container, &fl!("tpm"));
 
-    let tpm2_totp = Arc::new(Mutex::new(
-        //TODO: better error handling
-        Tpm2Totp::new().unwrap()
-    ));
     let refresh = Arc::new(AtomicBool::new(false));
 
     enum Message {
         Code(TotpCode),
-        Error(TotpError),
+        Error(DbusError),
         Timeout(f64),
     }
     let (sender, receiver) = glib::MainContext::channel(glib::PRIORITY_DEFAULT);
     {
-        let tpm2_totp = tpm2_totp.clone();
         let refresh = refresh.clone();
         thread::spawn(move || {
+            let client = DbusClient::new().unwrap(); // TODO: error handling
             loop {
-                let result = tpm2_totp.lock().unwrap().show();
+                let result = client.tpm2_totp_show();
                 match result {
                     Ok(ok) => {
                         sender.send(Message::Code(ok))
@@ -277,14 +276,13 @@ fn tpm<C: ContainerExt>(container: &C) {
     list_box.add(&row);
 
     {
-        //TODO: tpm2_totp in thread
-        let tpm2_totp = tpm2_totp.clone();
+        let client = DbusClient::new().unwrap(); // TODO: error handling
         let refresh = refresh.clone();
         init_button.connect_clicked(move |button| {
             button.set_sensitive(false);
 
             if let Some(password) = tpm_password_dialog(true) {
-                let result = tpm2_totp.lock().unwrap().init(&TotpPass(password));
+                let result = client.tpm2_totp_init(&TotpPass(password));
                 refresh.swap(true, Ordering::Relaxed);
                 match result {
                     Ok(secret) => {
@@ -323,14 +321,13 @@ fn tpm<C: ContainerExt>(container: &C) {
     }
 
     {
-        //TODO: tpm2_totp in thread
-        let tpm2_totp = tpm2_totp.clone();
+        let client = DbusClient::new().unwrap(); // TODO: error handling
         let refresh = refresh.clone();
         reseal_button.connect_clicked(move |button| {
             button.set_sensitive(false);
 
             if let Some(password) = tpm_password_dialog(false) {
-                let result = tpm2_totp.lock().unwrap().reseal(&TotpPass(password));
+                let result = client.tpm2_totp_reseal(&TotpPass(password));
                 refresh.swap(true, Ordering::Relaxed);
                 match result {
                     Ok(()) => (),
@@ -358,11 +355,11 @@ fn tpm<C: ContainerExt>(container: &C) {
                 init_button.set_visible(false);
                 reseal_button.set_visible(false);
                 match error {
-                    TotpError::SecretNotFound => {
+                    DbusError::Totp(TotpError::SecretNotFound) => {
                         label.set_text(&fl!("tpm2-totp-init"));
                         init_button.set_visible(true);
                     },
-                    TotpError::SystemStateChanged => {
+                    DbusError::Totp(TotpError::SystemStateChanged) => {
                         label.set_text(&fl!("tpm2-totp-reseal"));
                         reseal_button.set_visible(true);
                     },

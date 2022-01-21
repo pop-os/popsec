@@ -1,5 +1,4 @@
 use dbus::{ffidisp::Connection, Message};
-use std::error::Error as _;
 use thiserror::Error;
 
 use crate::tpm2_totp::*;
@@ -8,6 +7,8 @@ pub const DBUS_DEST: &str = "com.system76.PopSec";
 pub const DBUS_IFACE: &str = DBUS_DEST;
 pub const DBUS_PATH: &str = "/com/system76/PopSec";
 
+pub const METHOD_TPM2_TOTP_INIT: &str = "Tpm2TotpInit";
+pub const METHOD_TPM2_TOTP_RESEAL: &str = "Tpm2TotpReseal";
 pub const METHOD_TPM2_TOTP_SHOW: &str = "Tpm2TotpShow";
 
 /// An error that may occur when interacting with the popsec daemon.
@@ -25,6 +26,8 @@ pub enum Error {
     /// Failed to create a new method call.
     #[error("failed to create {} method call: {}", _0, _1)]
     NewMethodCall(&'static str, Box<str>),
+    #[error("TOTP error: {}", _0)]
+    Totp(TotpError),
 }
 
 impl From<TotpError> for dbus::Error {
@@ -127,7 +130,22 @@ impl Client {
 
         self.0
             .send_with_reply_and_block(m, -1)
-            .map_err(|why| Error::Call(method, why))
+            .map_err(|why| match TotpError::try_from(why) {
+                Ok(ok) => Error::Totp(ok),
+                Err(err) => Error::Call(method, err),
+            })
+    }
+
+    pub fn tpm2_totp_init(&self, password: &TotpPass) -> Result<TotpSecret, Error> {
+        self.call_method(METHOD_TPM2_TOTP_INIT, |m| m.append1(&password.0))?
+            .read1::<Vec<u8>>()
+            .map_err(|why| Error::ArgumentMismatch(METHOD_TPM2_TOTP_INIT, why))
+            .map(TotpSecret)
+    }
+
+    pub fn tpm2_totp_reseal(&self, password: &TotpPass) -> Result<(), Error> {
+        self.call_method(METHOD_TPM2_TOTP_RESEAL, |m| m.append1(&password.0))?;
+        Ok(())
     }
 
     pub fn tpm2_totp_show(&self) -> Result<TotpCode, Error> {

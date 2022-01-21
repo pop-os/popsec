@@ -28,6 +28,28 @@ fn daemon() -> Result<(), String> {
 
     let iface_token = cr.register(DBUS_IFACE, |b| {
         b.method(
+            METHOD_TPM2_TOTP_INIT,
+            ("password",),
+            ("secret",),
+            |_ctx: &mut Context, _state: &mut State, (password,): (String,)| {
+                let mut tpm2_totp = Tpm2Totp::new().map_err(MethodErr::from)?;
+                tpm2_totp.init(&TotpPass(password))
+                    .map(|v| (v.0,))
+                    .map_err(MethodErr::from)
+            }
+        );
+        b.method(
+            METHOD_TPM2_TOTP_RESEAL,
+            ("password",),
+            (),
+            |_ctx: &mut Context, _state: &mut State, (password,): (String,)| {
+                let mut tpm2_totp = Tpm2Totp::new().map_err(MethodErr::from)?;
+                tpm2_totp.reseal(&TotpPass(password))
+                    .map_err(MethodErr::from)?;
+                Ok(())
+            }
+        );
+        b.method(
             METHOD_TPM2_TOTP_SHOW,
             (),
             ("code",),
